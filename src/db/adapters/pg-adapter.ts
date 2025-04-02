@@ -65,13 +65,14 @@ export class PgAdapter implements DatabaseAdapter {
       this.options.connection as Record<string, unknown>;
     
     // 设置连接选项
-    const options = {
-      max: 1, // 限制连接数为1
-      idle_timeout: 2, // 快速关闭空闲连接
-      connect_timeout: 5 // 连接超时5秒
-    };
+    //const options = {
+    //  max: 1, // 限制连接数为1
+    //  idle_timeout: 2, // 快速关闭空闲连接
+    //  connect_timeout: 5 // 连接超时5秒
+    //};
     
-    return postgres(connectionOptions, options);
+    //return postgres(connectionOptions, options);
+    return postgres(connectionOptions);
   }
 
   /**
