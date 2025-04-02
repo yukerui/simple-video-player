@@ -2,7 +2,6 @@ import { DatabaseAdapter } from './adapters/base.js';
 import { SQLAdapter } from './adapters/sql-adapter.js';
 import { PgAdapter, PgAdapterOptions } from './adapters/pg-adapter.js';
 import { KVAdapter } from './adapters/kv-adapter.js';
-import { JsonAdapter } from './adapters/json-adapter.js';
 
 /**
  * 数据库配置接口
@@ -58,47 +57,71 @@ export class Database {
    * 初始化数据库
    * 按优先级选择适当的适配器
    */
-  public async initialize(config: DatabaseConfig = {}): Promise<boolean> {
-    if (this.initialized) {
-      return true;
+  public async initialize(config: DatabaseConfig): Promise<boolean> {
+    if (this.initialized && this.adapter) return true;
+    
+    // 关闭已有连接
+    if (this.adapter) {
+      await this.adapter.close();
+      this.adapter = null;
     }
-
-    // 检查是否有任何数据库配置
-    const hasConfig = config.sqlDsn || config.pgConfig || config.kvNamespace;
-
+    
     try {
-      // 如果有 KV 命名空间，使用 KV 适配器
-      if (config.kvNamespace) {
-        this.adapter = new KVAdapter({ namespace: config.kvNamespace });
-        console.log('使用 KV 存储适配器');
+      // 优先级 1: SQL_DSN
+      if (config.sqlDsn) {
+        console.log('使用 SQL 数据库适配器');
+        this.adapter = new SQLAdapter(config.sqlDsn);
+        if (await this.adapter.initialize()) {
+          this.initialized = true;
+          return true;
+        } else {
+          // 初始化失败，尝试下一个适配器
+          this.adapter = null;
+        }
       }
-      // 如果有 PostgreSQL 配置，使用 PostgreSQL 适配器
-      else if (config.pgConfig) {
-        this.adapter = new PgAdapter(config.pgConfig);
-        console.log('使用 PostgreSQL 适配器');
+      
+      // 优先级 2: PostgreSQL (Neon 或 Supabase)
+      if (!this.adapter && config.pgConfig && config.pgConfig.connection) {
+        console.log('使用 PostgreSQL 数据库适配器');
+        const options: PgAdapterOptions = {
+          connection: config.pgConfig.connection,
+          tableName: config.pgConfig.tableName
+        };
+        
+        this.adapter = new PgAdapter(options);
+        if (await this.adapter.initialize()) {
+          this.initialized = true;
+          return true;
+        } else {
+          // 初始化失败，尝试下一个适配器
+          this.adapter = null;
+        }
       }
-      // 如果有 SQL DSN，使用 SQL 适配器
-      else if (config.sqlDsn) {
-        this.adapter = new SQLAdapter({ dsn: config.sqlDsn });
-        console.log('使用 SQL 适配器');
-      }
-      // 如果没有配置，默认使用 JSON 文件适配器
-      else {
-        this.adapter = new JsonAdapter();
-        console.log('使用 JSON 文件适配器');
-      }
+      
+      // 优先级 3: Cloudflare KV
+      if (!this.adapter && config.kvNamespace) {
+        console.log('使用 Cloudflare KV 数据库适配器');
+        this.adapter = new KVAdapter(config.kvNamespace);
 
-      // 初始化选定的适配器
-      const success = await this.adapter.initialize();
-      if (success) {
-        this.initialized = true;
-        return true;
-      } else {
-        console.error('初始化数据库适配器失败');
+        if (await this.adapter.initialize()) {
+          this.initialized = true;
+          return true;
+        } else {
+          // 初始化失败
+          this.adapter = null;
+        }
+      }
+      
+      if (!this.adapter) {
+        console.error('无法初始化任何数据库适配器');
         return false;
       }
+      
+      return true;
     } catch (error) {
-      console.error('数据库初始化错误:', error);
+      console.error('初始化数据库失败:', error);
+      this.adapter = null;
+      this.initialized = false;
       return false;
     }
   }
